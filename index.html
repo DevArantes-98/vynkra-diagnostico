@@ -494,6 +494,17 @@ h1, h2 {
 }
 </style>
 
+<!-- Google Analytics 4 -->
+<!-- SUBSTITUA G-XXXXXXXXXX pelo seu Measurement ID em ambas as linhas abaixo -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-47VEWDTG84"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-47VEWDTG84');
+</script>
+<!-- End Google Analytics 4 -->
+
 <!-- Meta Pixel Code -->
 <script>
 !function(f,b,e,v,n,t,s)
@@ -580,6 +591,8 @@ src="https://www.facebook.com/tr?id=1379717323098046&ev=PageView&noscript=1"
 // CONFIGURAÇÃO — TROQUE AQUI A URL DO SEU WEBHOOK DO N8N
 // ===================================================================
 const WEBHOOK_URL = 'https://webhooks.manager-01.ribeiro5g.com/webhook/typeform';
+// SUBSTITUA pelo seu Measurement ID do GA4 (mesmo valor do <head>)
+const GA4_ID = 'G-47VEWDTG84';
 // ===================================================================
 
 // Estrutura das perguntas (espelhada do Typeform)
@@ -744,10 +757,23 @@ const QUESTIONS = [
 
 // === Estado ===
 const state = {
-  current: 0,            // 0 = welcome, 1..QUESTIONS.length = perguntas, depois loading/success
+  current: 0,
   answers: {},
-  total: QUESTIONS.length + 1  // +1 do welcome
+  total: QUESTIONS.length + 1,
+  submitted: false
 };
+
+// === Tracking GA4 ===
+function trackEvent(name, params) {
+  if (typeof gtag === 'function') gtag('event', name, params);
+}
+
+function getStepInfo(index) {
+  if (index === 0) return { step_index: 0, step_id: 'welcome', step_name: 'Boas-vindas' };
+  const q = QUESTIONS[index - 1];
+  if (q) return { step_index: index, step_id: q.id, step_name: q.title };
+  return { step_index: index, step_id: 'final', step_name: 'Finalização' };
+}
 
 // === Renderização das perguntas ===
 function renderQuestions() {
@@ -867,6 +893,7 @@ function showScreen(index) {
   }
 
   updateProgress(index);
+  trackEvent('form_step_view', getStepInfo(index));
 }
 
 function focusFirstInput(screen) {
@@ -892,6 +919,7 @@ function updateProgress(index) {
 }
 
 function nextScreen() {
+  trackEvent('form_step_complete', getStepInfo(state.current));
   state.current++;
   showScreen(state.current);
 }
@@ -1057,6 +1085,15 @@ function showFinalScreen(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelector(`[data-screen="${name}"]`).classList.add('active');
   document.getElementById('progressFill').style.width = '100%';
+  if (name === 'success') {
+    state.submitted = true;
+    const score = calculateScore();
+    trackEvent('form_submit', {
+      score_tier: score.tier,
+      score_percentage: score.percentage,
+      score_raw: score.raw
+    });
+  }
 }
 
 function getUTMs() {
@@ -1132,6 +1169,21 @@ function escapeHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+// === Tracking de abandono ===
+function handleAbandon() {
+  if (state.submitted || state.current === 0) return;
+  trackEvent('form_abandon', {
+    ...getStepInfo(state.current),
+    answers_count: Object.keys(state.answers).length
+  });
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') handleAbandon();
+});
+
+window.addEventListener('beforeunload', handleAbandon);
 
 // === Inicialização ===
 renderQuestions();
